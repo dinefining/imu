@@ -4,7 +4,12 @@
   // ---------------------------------------------------------------------------
   // Tuning
   // ---------------------------------------------------------------------------
-  const FIND_RADIUS = 0.02;          // world units (world is 1 x 1)
+  // Difficulty: how close the cursors must be (world units, world is 1 x 1)
+  // to see each other and to count as found. Left square easy, right hard.
+  const RADII = [0.05, 0.035, 0.02, 0.012, 0.007];
+  const DEFAULT_DIFFICULTY = 2;
+  const ROOM_DIGITS = 6;             // invite links look like ?imu-this-482913-much
+  const ENABLE_STRANGER = false;     // the "stranger" queue, hidden for now
   const FIND_HOLD_MS = 1000;         // time inside the radius to count as found
   const SEND_MS = 1000 / 15;         // ~15 position updates per second
   const HEARTBEAT_MS = 1000;         // resend position even when still
@@ -106,6 +111,14 @@
     return s;
   }
 
+  function randDigits(n) {
+    const bytes = new Uint32Array(n);
+    crypto.getRandomValues(bytes);
+    let s = String(1 + (bytes[0] % 9)); // no leading zero
+    for (let i = 1; i < n; i++) s += bytes[i] % 10;
+    return s;
+  }
+
   const myId = randId(12);
 
   // Game / connection state.
@@ -130,10 +143,11 @@
 
   let locked = false, lastPointerType = 'mouse';
   let soundOn = false, actx = null, nextPulse = 0;
+  let difficulty = loadDifficulty(), difficultyAt = 0;
   let buttons = [];
 
-  const params = new URLSearchParams(location.search);
-  const inviteParam = (params.get('r') || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16);
+  const inviteMatch = decodeURIComponent(location.search.slice(1)).toLowerCase().match(/^imu-this-(\d{1,12})-much$/);
+  const inviteRoom = inviteMatch ? inviteMatch[1] : '';
 
   const configured = cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY &&
     !/YOUR-/.test(cfg.SUPABASE_URL + cfg.SUPABASE_ANON_KEY);
@@ -147,7 +161,7 @@
       auth: { persistSession: false, autoRefreshToken: false },
       realtime: { params: { eventsPerSecond: 40 } },
     });
-    state = inviteParam ? 'join' : 'menu';
+    state = inviteRoom ? 'join' : 'menu';
   }
 
   // ---------------------------------------------------------------------------
@@ -276,6 +290,7 @@
       .on('broadcast', { event: 'pos' }, ({ payload }) => { if (ch === roomCh) onPos(payload); })
       .on('broadcast', { event: 'round' }, ({ payload }) => { if (ch === roomCh) onRound(payload); })
       .on('broadcast', { event: 'found' }, ({ payload }) => { if (ch === roomCh) onFound(payload); })
+      .on('broadcast', { event: 'diff' }, ({ payload }) => { if (ch === roomCh) onDifficulty(payload); })
       .subscribe((status) => {
         if (ch !== roomCh) return;
         if (status === 'SUBSCRIBED') ch.track({ t: joinT });
@@ -317,6 +332,7 @@
       state = 'playing';
       startRound(Math.max(round + 1, remoteRound));
       send(roomCh, 'round', { r: round });
+      sendDifficulty();
     } else if (!peer && peerPresent) {
       peerPresent = false;
       peerId = null;
@@ -359,6 +375,7 @@
     if (p.r !== round) return;
     other.tx = clamp01(+p.x || 0);
     other.ty = clamp01(+p.y || 0);
+    if (typeof p.at === 'number') onDifficulty({ d: p.d, at: p.at, id: peerId });
   }
 
   function onFound(p) {
@@ -374,6 +391,37 @@
     nearSince = null;
     if (announce) send(roomCh, 'found', { r: round, ms: Math.round(ms) });
     if (soundOn) chime();
+  }
+
+  // Difficulty is shared: the most recent choice wins (ties: lower id).
+  function setDifficulty(d) {
+    difficulty = d;
+    difficultyAt = Date.now();
+    try { localStorage.setItem('imu-difficulty', String(d)); } catch (_) { /* ignore */ }
+    sendDifficulty();
+  }
+
+  function sendDifficulty() {
+    send(roomCh, 'diff', { d: difficulty, at: difficultyAt, id: myId });
+  }
+
+  function onDifficulty(p) {
+    if (!p || !(p.d >= 0 && p.d < RADII.length)) return;
+    const newer = p.at > difficultyAt || (p.at === difficultyAt && String(p.id) < myId);
+    if (!newer) {
+      if (p.at < difficultyAt) sendDifficulty(); // they're behind: tell them
+      return;
+    }
+    difficulty = p.d | 0;
+    difficultyAt = p.at;
+  }
+
+  function loadDifficulty() {
+    try {
+      const d = parseInt(localStorage.getItem('imu-difficulty'), 10);
+      if (d >= 0 && d < RADII.length) return d;
+    } catch (_) { /* ignore */ }
+    return DEFAULT_DIFFICULTY;
   }
 
   function again() {
@@ -474,9 +522,10 @@
   // Actions
   // ---------------------------------------------------------------------------
   function invite() {
-    const id = randId(8);
-    const url = location.href.split(/[?#]/)[0] + '?r=' + id;
-    try { history.replaceState(null, '', '?r=' + id); } catch (_) { /* ignore */ }
+    const id = randDigits(ROOM_DIGITS);
+    const slug = 'imu-this-' + id + '-much';
+    const url = location.href.split(/[?#]/)[0] + '?' + slug;
+    try { history.replaceState(null, '', '?' + slug); } catch (_) { /* ignore */ }
     copy(url);
     joinRoom(id, 'invite');
   }
@@ -708,7 +757,7 @@
       if (e < 1) { drawHalo(mx, my, e); drawHalo(px, py, e); }
     }
 
-    if (playing && (found || dist() < FIND_RADIUS)) bitmap(CURSOR, px, py, C.other);
+    if (playing && (found || dist() < RADII[difficulty])) bitmap(CURSOR, px, py, C.other);
 
     if (state === 'playing' || state === 'left') drawMeter(t);
 
@@ -726,6 +775,10 @@
 
     switch (state) {
       case 'menu': {
+        if (!ENABLE_STRANGER) {
+          buttonCentered('invite', cx, cy, invite);
+          break;
+        }
         const w1 = textWidth('invite'), w2 = textWidth('stranger'), gap = 10 * u;
         const x1 = snapX(cx - (w1 + gap + w2) / 2);
         button('invite', x1, cy, invite);
@@ -733,7 +786,7 @@
         break;
       }
       case 'join':
-        buttonCentered('join', cx, cy, () => joinRoom(inviteParam, 'invite'));
+        buttonCentered('join', cx, cy, () => joinRoom(inviteRoom, 'invite'));
         break;
       case 'lobby':
       case 'waiting':
@@ -750,6 +803,22 @@
       case 'error':
         textCentered(errText, cx, cy, C.text);
         break;
+    }
+
+    // Difficulty, bottom-left corner: 5 squares, left easy, right hard.
+    if (state !== 'error') {
+      const sq = 2 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
+      const dx = snapX(ox + 4 * u), dy = snapY(oy + side - 7 * u);
+      const pad = (lastPointerType === 'mouse' ? 2 : 5) * u;
+      for (let i = 0; i < RADII.length; i++) {
+        const x = dx + i * (sq + gap);
+        const box = { x: x - gap / 2, y: dy - pad, w: sq + gap, h: sq + 2 * pad };
+        const color = i === difficulty ? C.iconHi : hover(box) ? '#4a4a4a' : C.icon;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, dy, sq, sq);
+        buttons.push(Object.assign(box, { action: () => setDifficulty(i) }));
+      }
     }
 
     // Sound toggle, bottom-right corner of the play area.
@@ -776,7 +845,7 @@
     if (state !== 'playing' || !roomCh) return;
 
     if ((moved && t - lastSend >= SEND_MS) || t - lastSend >= HEARTBEAT_MS) {
-      send(roomCh, 'pos', { x: +me.x.toFixed(4), y: +me.y.toFixed(4), r: round });
+      send(roomCh, 'pos', { x: +me.x.toFixed(4), y: +me.y.toFixed(4), r: round, d: difficulty, at: difficultyAt });
       lastSend = t;
       moved = false;
     }
@@ -792,7 +861,7 @@
 
     if (found) return;
 
-    if (d < FIND_RADIUS) {
+    if (d < RADII[difficulty]) {
       if (nearSince === null) nearSince = t;
       else if (t - nearSince >= FIND_HOLD_MS) doFound(t - roundStart, true);
     } else {
