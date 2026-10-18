@@ -34,6 +34,7 @@
     icon: '#333',
     iconHi: '#8a8a8a',
     halo: ['#e8783a', '#e8ad4c', '#efe0a0'],
+    difficulty: ['#5fb36a', '#a7c25a', '#e0c04f', '#e08a3c', '#d9493b'], // easy -> hard
   };
 
   // ---------------------------------------------------------------------------
@@ -64,23 +65,20 @@
     '..X....',
   ];
 
+  // Icons sit on the same 5-pixel-tall grid as the type.
   const COPY_ICON = [
-    '..XXXXX',
-    '..X...X',
-    'XXXXX.X',
-    'X...X.X',
-    'X...XXX',
-    'X...X..',
-    'XXXXX..',
+    '..XXXX',
+    'XXXX.X',
+    'X..X.X',
+    'X..XXX',
+    'XXXX..',
   ];
   const CHECK_ICON = [
-    '.......',
-    '......X',
-    '.....X.',
-    'X...X..',
-    '.X.X...',
-    '..X....',
-    '.......',
+    '.....X',
+    '....X.',
+    '...X..',
+    'X.X...',
+    '.X....',
   ];
 
   // 3x5 pixel font (variable width for punctuation).
@@ -122,7 +120,7 @@
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  let W = 0, H = 0, dpr = 1, side = 0, ox = 0, oy = 0, u = 2;
+  let W = 0, H = 0, dpr = 1, sw = 0, sh = 0, ox = 0, oy = 0, u = 2;
 
   function randId(n) {
     const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -600,8 +598,8 @@
   // Input
   // ---------------------------------------------------------------------------
   function setAbsolute(e) {
-    me.x = clamp01((e.clientX * dpr - ox) / side);
-    me.y = clamp01((e.clientY * dpr - oy) / side);
+    me.x = clamp01((e.clientX * dpr - ox) / sw);
+    me.y = clamp01((e.clientY * dpr - oy) / sh);
     moved = true;
   }
 
@@ -614,8 +612,8 @@
     if (locked) {
       const mx = e.movementX || 0, my = e.movementY || 0;
       if (Math.abs(mx) > 300 || Math.abs(my) > 300) return; // ignore spurious jumps
-      me.x = clamp01(me.x + (mx * dpr) / side);
-      me.y = clamp01(me.y + (my * dpr) / side);
+      me.x = clamp01(me.x + (mx * dpr) / sw);
+      me.y = clamp01(me.y + (my * dpr) / sh);
       moved = true;
       return;
     }
@@ -660,19 +658,21 @@
     H = canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
     const sideCss = Math.min(window.innerWidth, window.innerHeight);
     u = Math.max(2, Math.round(Math.max(2, Math.round(sideCss / 240)) * dpr));
-    side = Math.min(W, H);
-    ox = Math.round((W - side) / 2);
-    oy = Math.round((H - side) / 2);
+    // The world fills the whole screen: x maps to the width, y to the height.
+    sw = W;
+    sh = H;
+    ox = 0;
+    oy = 0;
     ctx.imageSmoothingEnabled = false;
   }
 
-  const gridX = (x) => ox + Math.round((x * side) / u) * u;
-  const gridY = (y) => oy + Math.round((y * side) / u) * u;
+  const gridX = (x) => ox + Math.round((x * sw) / u) * u;
+  const gridY = (y) => oy + Math.round((y * sh) / u) * u;
   const snapX = (px) => ox + Math.round((px - ox) / u) * u;
   const snapY = (py) => oy + Math.round((py - oy) / u) * u;
 
   function cursorPx() {
-    return { x: ox + me.x * side, y: oy + me.y * side };
+    return { x: ox + me.x * sw, y: oy + me.y * sh };
   }
 
   function bitmap(rows, x, y, color, a = 1, s = u) {
@@ -701,21 +701,21 @@
   }
 
   // The invite link in pixel type with a copy icon; the whole row copies.
-  function drawLink(cy, withText) {
+  function drawLink(y) {
     const label = inviteUrl.replace(/^https?:\/\//, '').toLowerCase();
-    const iconW = 7 * u, gap = withText ? 4 * u : 0;
-    const maxW = side - 16 * u;
+    const iconCols = COPY_ICON[0].length;
+    const rowW = (sc) => textWidth(label, sc) + (4 + iconCols) * sc;
     let s = u;
-    if (withText && textWidth(label, s) + gap + iconW > maxW) {
-      s = Math.max(1, Math.floor((u * (maxW - gap - iconW)) / textWidth(label, u)));
-    }
-    const tw = withText ? textWidth(label, s) : 0;
-    const x0 = snapX(ox + side / 2 - (tw + gap + iconW) / 2);
-    const box = hitBox(x0, cy - u, tw + gap + iconW, 7 * u);
+    const maxW = sw - 16 * u;
+    if (rowW(s) > maxW) s = Math.max(1, Math.floor((u * maxW) / rowW(u)));
+    const tw = textWidth(label, s);
+    const x0 = snapX(ox + sw / 2 - rowW(s) / 2);
+    const ty = y + Math.round(2.5 * (u - s)); // keep the row centred on the line
+    const box = hitBox(x0, ty, rowW(s), 5 * s);
     const hot = hover(box);
-    if (withText) textAt(label, x0, cy + Math.round(2.5 * (u - s)), hot ? C.textHi : C.text, 1, s);
     const copied = now() < copiedUntil;
-    bitmap(copied ? CHECK_ICON : COPY_ICON, x0 + tw + gap, cy - u, copied ? C.textHi : hot ? C.textHi : C.text);
+    textAt(label, x0, ty, hot ? C.textHi : C.text, 1, s);
+    bitmap(copied ? CHECK_ICON : COPY_ICON, x0 + tw + 4 * s, ty, hot || copied ? C.textHi : C.text, 1, s);
     buttons.push(Object.assign(box, { action: () => copy(inviteUrl) }));
   }
 
@@ -769,7 +769,7 @@
 
   function drawMeter(t) {
     const sq = 2 * u, gap = u, total = 6 * sq + 5 * gap;
-    const x0 = snapX(ox + (side - total) / 2);
+    const x0 = snapX(ox + (sw - total) / 2);
     const y0 = meterY();
     let lit = 0, color = C.dim, a = 1;
     if (state === 'playing' && other.known) {
@@ -797,9 +797,9 @@
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, W, H);
 
-    const cx = ox + side / 2;
-    const cy = snapY(oy + side / 2 - 2.5 * u);
-    const bottom = snapY(oy + side - 12 * u);
+    const cx = ox + sw / 2;
+    const cy = snapY(oy + sh / 2 - 2.5 * u);
+    const bottom = snapY(oy + sh - 12 * u);
     const mx = gridX(me.x), my = gridY(me.y);
     const px = gridX(other.x), py = gridY(other.y);
     const playing = state === 'playing' && other.known;
@@ -841,14 +841,13 @@
         buttonCentered('join', cx, cy, () => joinRoom(inviteRoom, 'invite'));
         break;
       case 'share':
-        drawLink(snapY(cy - 6 * u), true);
+        drawLink(snapY(cy - 6 * u));
         buttonCentered('enter', cx, snapY(cy + 8 * u), enterRoom);
         if (t < flashUntil) textCentered(flashText, cx, snapY(cy + 18 * u), C.text);
         break;
       case 'lobby':
       case 'waiting':
         textCentered(t < flashUntil ? flashText : 'waiting', cx, cy, C.text);
-        if (mode === 'invite' && inviteUrl) drawLink(snapY(cy + 10 * u), false);
         break;
       case 'left':
         textCentered('they left', cx, cy, C.text);
@@ -873,29 +872,33 @@
       ctx.fillRect(x0 + sq + u, y0, sq, sq);
     }
 
-    // Difficulty, bottom-left corner: 5 rising bars, filled up to the level.
+    // Difficulty, bottom-left corner: the word, then 5 type-height boxes.
+    // Only the selected one is lit, in its colour: green (easy) to red (hard).
     if (state !== 'error') {
-      const bw = 2 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
+      const ty = snapY(oy + sh - 9 * u), tx = snapX(ox + 4 * u);
+      textAt('difficulty', tx, ty, C.icon);
+      const bs = 5 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
       const pad = (lastPointerType === 'mouse' ? 2 : 5) * u;
-      const dx = snapX(ox + 4 * u), base = snapY(oy + side - 4 * u);
-      const tallest = (RADII.length + 1) * u;
+      const bx = tx + textWidth('difficulty') + 3 * u;
       const boxes = RADII.map((_, i) => {
-        const x = dx + i * (bw + gap);
-        return { x: x - gap / 2, y: base - tallest - pad, w: bw + gap, h: tallest + 2 * pad, i };
+        const x = bx + i * (bs + gap);
+        return { x: x - gap / 2, y: ty - pad, w: bs + gap, h: bs + 2 * pad, i };
       });
       const hot = boxes.findIndex(hover);
-      for (const b of boxes) {
-        const i = b.i, h = (i + 2) * u, x = dx + i * (bw + gap);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = i <= difficulty ? C.iconHi : i <= hot ? '#3d3d3d' : '#202020';
-        ctx.fillRect(x, base - h, bw, h);
-        buttons.push(Object.assign(b, { action: () => setDifficulty(i) }));
+      for (const box of boxes) {
+        const i = box.i;
+        const lit = i === difficulty, preview = !lit && i === hot;
+        ctx.globalAlpha = preview ? 0.35 : 1;
+        ctx.fillStyle = lit || preview ? C.difficulty[i] : C.dim;
+        ctx.fillRect(bx + i * (bs + gap), ty, bs, bs);
+        buttons.push(Object.assign(box, { action: () => setDifficulty(i) }));
       }
+      ctx.globalAlpha = 1;
     }
 
     // Sound toggle, bottom-right corner of the play area.
     if (state !== 'error') {
-      const ix = snapX(ox + side - 11 * u), iy = snapY(oy + side - 9 * u);
+      const ix = snapX(ox + sw - 11 * u), iy = snapY(oy + sh - 9 * u);
       const box = hitBox(ix, iy, 7 * u, 5 * u);
       bitmap(soundOn ? SPK_ON : SPK_OFF, ix, iy, hover(box) ? C.iconHi : C.icon);
       buttons.push(Object.assign(box, { action: toggleSound }));
