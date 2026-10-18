@@ -32,11 +32,12 @@ Push these files to a repo, then go to **Settings → Pages → Deploy from a br
 
 ## How it plays
 
-- **invite** creates a private room and copies a link like `https://…/?imu-this-482913-much` to your clipboard. The number is random, and the link also appears in the address bar. Whoever opens it sees **join**.
+- **invite** creates a private room and shows its link, like `…/?imu-this-482913-much`, with a copy icon next to it. The number is random. Click the icon (or the link) to copy it, send it to someone, then click **enter**. While you wait, there's a copy icon under **waiting** in case you need the link again. Whoever opens the link sees **join**.
 - **stranger** (a queue that pairs you with the next person waiting) is built but hidden for now. Set `ENABLE_STRANGER = true` at the top of `main.js` to bring it back.
 - **waiting** means you're alone in the dark until the other person arrives.
+- Two small squares in the top-left corner show who's in the room: the first is you, and the second lights up while the other person is there.
 - The meter has 6 steps, from cold blue-grey (far) through pale blue, white, pale yellow and amber to warm orange (close).
-- The five squares in the bottom-left corner set the difficulty: how close the cursors must be to see each other. From left (easy) to right (hard) the range is 5%, 3.5%, 2%, 1.2% and 0.7% of the world width. The middle one is the default. The setting is shared, so whoever changed it last sets it for both players, and it's remembered in your browser.
+- The five rising bars in the bottom-left corner set the difficulty, filled up to the current level: how close the cursors must be to see each other. From left (easy) to right (hard) the range is 5%, 3.5%, 2%, 1.2% and 0.7% of the world width. The middle one is the default. The setting is shared, so whoever changed it last sets it for both players, and it's remembered in your browser.
 - When the cursors are within that range, you can see each other. If you stay that close for 1 second, you've found each other: both cursors glow with a dithered halo, the meter fills and fades, and the time shows for 3 seconds.
 - **again** (bottom) starts a new round, with both cursors respawned far apart.
 - **they left** means the other player's presence is gone and the meter goes dark. In an invite room, play picks up again if they come back through the link.

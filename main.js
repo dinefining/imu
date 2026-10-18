@@ -64,6 +64,25 @@
     '..X....',
   ];
 
+  const COPY_ICON = [
+    '..XXXXX',
+    '..X...X',
+    'XXXXX.X',
+    'X...X.X',
+    'X...XXX',
+    'X...X..',
+    'XXXXX..',
+  ];
+  const CHECK_ICON = [
+    '.......',
+    '......X',
+    '.....X.',
+    'X...X..',
+    '.X.X...',
+    '..X....',
+    '.......',
+  ];
+
   // 3x5 pixel font (variable width for punctuation).
   const FONT = {
     a: ['.X.', 'X.X', 'XXX', 'X.X', 'X.X'], b: ['XX.', 'X.X', 'XX.', 'X.X', 'XX.'],
@@ -85,6 +104,9 @@
     6: ['.XX', 'X..', 'XXX', 'X.X', 'XXX'], 7: ['XXX', '..X', '.X.', '.X.', '.X.'],
     8: ['XXX', 'X.X', 'XXX', 'X.X', 'XXX'], 9: ['XXX', 'X.X', 'XXX', '..X', 'XX.'],
     '.': ['.', '.', '.', '.', 'X'], ':': ['.', 'X', '.', 'X', '.'],
+    '/': ['..X', '..X', '.X.', 'X..', 'X..'], '-': ['...', '...', 'XXX', '...', '...'],
+    '?': ['XX.', '..X', '.X.', '...', '.X.'], '_': ['...', '...', '...', '...', 'XXX'],
+    '=': ['...', 'XXX', '...', 'XXX', '...'],
     ' ': ['..', '..', '..', '..', '..'],
   };
 
@@ -140,6 +162,7 @@
   let found = false, foundAt = 0, foundMs = 0, levelAtFound = 1;
   let level = 0, pendingLevel = 0, pendingSince = 0;
   let flashText = '', flashUntil = 0;
+  let inviteId = '', inviteUrl = '', copiedUntil = 0;
 
   let locked = false, lastPointerType = 'mouse';
   let soundOn = false, actx = null, nextPulse = 0;
@@ -148,6 +171,10 @@
 
   const inviteMatch = decodeURIComponent(location.search.slice(1)).toLowerCase().match(/^imu-this-(\d{1,12})-much$/);
   const inviteRoom = inviteMatch ? inviteMatch[1] : '';
+  if (inviteRoom) {
+    inviteId = inviteRoom;
+    inviteUrl = location.href.split('#')[0];
+  }
 
   const configured = cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY &&
     !/YOUR-/.test(cfg.SUPABASE_URL + cfg.SUPABASE_ANON_KEY);
@@ -526,13 +553,19 @@
     const slug = 'imu-this-' + id + '-much';
     const url = location.href.split(/[?#]/)[0] + '?' + slug;
     try { history.replaceState(null, '', '?' + slug); } catch (_) { /* ignore */ }
-    copy(url);
-    joinRoom(id, 'invite');
+    inviteId = id;
+    inviteUrl = url;
+    copiedUntil = 0;
+    state = 'share';
+  }
+
+  function enterRoom() {
+    joinRoom(inviteId, 'invite');
   }
 
   function copy(text) {
-    const ok = () => flash('copied');
-    const bad = () => flash('copy url');
+    const ok = () => { copiedUntil = now() + 1500; };
+    const bad = () => flash('copy from the address bar');
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(ok, () => (fallbackCopy(text) ? ok() : bad()));
     } else if (fallbackCopy(text)) ok(); else bad();
@@ -642,29 +675,48 @@
     return { x: ox + me.x * side, y: oy + me.y * side };
   }
 
-  function bitmap(rows, x, y, color, a = 1) {
+  function bitmap(rows, x, y, color, a = 1, s = u) {
     ctx.globalAlpha = a;
     ctx.fillStyle = color;
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r];
       for (let c = 0; c < row.length; c++) {
-        if (row[c] === 'X') ctx.fillRect(x + c * u, y + r * u, u, u);
+        if (row[c] === 'X') ctx.fillRect(x + c * s, y + r * s, s, s);
       }
     }
   }
 
-  function textWidth(str) {
+  function textWidth(str, s = u) {
     let w = 0;
     for (const ch of str) w += (FONT[ch] || FONT[' '])[0].length + 1;
-    return Math.max(0, w - 1) * u;
+    return Math.max(0, w - 1) * s;
   }
 
-  function textAt(str, x, y, color, a = 1) {
+  function textAt(str, x, y, color, a = 1, s = u) {
     for (const ch of str) {
       const g = FONT[ch] || FONT[' '];
-      bitmap(g, x, y, color, a);
-      x += (g[0].length + 1) * u;
+      bitmap(g, x, y, color, a, s);
+      x += (g[0].length + 1) * s;
     }
+  }
+
+  // The invite link in pixel type with a copy icon; the whole row copies.
+  function drawLink(cy, withText) {
+    const label = inviteUrl.replace(/^https?:\/\//, '').toLowerCase();
+    const iconW = 7 * u, gap = withText ? 4 * u : 0;
+    const maxW = side - 16 * u;
+    let s = u;
+    if (withText && textWidth(label, s) + gap + iconW > maxW) {
+      s = Math.max(1, Math.floor((u * (maxW - gap - iconW)) / textWidth(label, u)));
+    }
+    const tw = withText ? textWidth(label, s) : 0;
+    const x0 = snapX(ox + side / 2 - (tw + gap + iconW) / 2);
+    const box = hitBox(x0, cy - u, tw + gap + iconW, 7 * u);
+    const hot = hover(box);
+    if (withText) textAt(label, x0, cy + Math.round(2.5 * (u - s)), hot ? C.textHi : C.text, 1, s);
+    const copied = now() < copiedUntil;
+    bitmap(copied ? CHECK_ICON : COPY_ICON, x0 + tw + gap, cy - u, copied ? C.textHi : hot ? C.textHi : C.text);
+    buttons.push(Object.assign(box, { action: () => copy(inviteUrl) }));
   }
 
   function textCentered(str, cx, y, color, a = 1) {
@@ -788,9 +840,15 @@
       case 'join':
         buttonCentered('join', cx, cy, () => joinRoom(inviteRoom, 'invite'));
         break;
+      case 'share':
+        drawLink(snapY(cy - 6 * u), true);
+        buttonCentered('enter', cx, snapY(cy + 8 * u), enterRoom);
+        if (t < flashUntil) textCentered(flashText, cx, snapY(cy + 18 * u), C.text);
+        break;
       case 'lobby':
       case 'waiting':
         textCentered(t < flashUntil ? flashText : 'waiting', cx, cy, C.text);
+        if (mode === 'invite' && inviteUrl) drawLink(snapY(cy + 10 * u), false);
         break;
       case 'left':
         textCentered('they left', cx, cy, C.text);
@@ -805,19 +863,33 @@
         break;
     }
 
-    // Difficulty, bottom-left corner: 5 squares, left easy, right hard.
+    // Who's here, top-left corner: you, and them (lit while they're in the room).
+    if (state === 'waiting' || state === 'playing' || state === 'left') {
+      const sq = 2 * u, x0 = snapX(ox + 4 * u), y0 = meterY();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = C.text;
+      ctx.fillRect(x0, y0, sq, sq);
+      ctx.fillStyle = peerPresent ? C.other : C.dim;
+      ctx.fillRect(x0 + sq + u, y0, sq, sq);
+    }
+
+    // Difficulty, bottom-left corner: 5 rising bars, filled up to the level.
     if (state !== 'error') {
-      const sq = 2 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
-      const dx = snapX(ox + 4 * u), dy = snapY(oy + side - 7 * u);
+      const bw = 2 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
       const pad = (lastPointerType === 'mouse' ? 2 : 5) * u;
-      for (let i = 0; i < RADII.length; i++) {
-        const x = dx + i * (sq + gap);
-        const box = { x: x - gap / 2, y: dy - pad, w: sq + gap, h: sq + 2 * pad };
-        const color = i === difficulty ? C.iconHi : hover(box) ? '#4a4a4a' : C.icon;
+      const dx = snapX(ox + 4 * u), base = snapY(oy + side - 4 * u);
+      const tallest = (RADII.length + 1) * u;
+      const boxes = RADII.map((_, i) => {
+        const x = dx + i * (bw + gap);
+        return { x: x - gap / 2, y: base - tallest - pad, w: bw + gap, h: tallest + 2 * pad, i };
+      });
+      const hot = boxes.findIndex(hover);
+      for (const b of boxes) {
+        const i = b.i, h = (i + 2) * u, x = dx + i * (bw + gap);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = color;
-        ctx.fillRect(x, dy, sq, sq);
-        buttons.push(Object.assign(box, { action: () => setDifficulty(i) }));
+        ctx.fillStyle = i <= difficulty ? C.iconHi : i <= hot ? '#3d3d3d' : '#202020';
+        ctx.fillRect(x, base - h, bw, h);
+        buttons.push(Object.assign(b, { action: () => setDifficulty(i) }));
       }
     }
 
