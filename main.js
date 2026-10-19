@@ -5,8 +5,8 @@
   // Tuning
   // ---------------------------------------------------------------------------
   // Difficulty: how close the cursors must be (world units, world is 1 x 1)
-  // to see each other and to count as found. Left square easy, right hard.
-  const RADII = [0.05, 0.035, 0.02, 0.012, 0.007];
+  // to see each other and to count as found. Left heart easy, right hard.
+  const RADII = [0.05, 0.03, 0.016, 0.008, 0.004];
   const DEFAULT_DIFFICULTY = 2;
   const ROOM_DIGITS = 6;             // invite links look like ?imu-this-482913-much
   const ENABLE_STRANGER = false;     // the "stranger" queue, hidden for now
@@ -16,13 +16,17 @@
   const LEVEL_DEBOUNCE_MS = 110;     // meter must agree for this long to step
   const STRANGER_ROOM_TIMEOUT_MS = 7000;
   const PROPOSAL_MS = 2000;
-  const HALO_MS = 1400;
+  const HALO_MS = 1600;
+  // #poster renders a still frame of two cursors meeting, used for og.png.
+  const POSTER = location.hash === '#poster';
 
   // Distance thresholds for the 6 meter steps: d > THRESH[k] => level k + 1.
   const THRESH = [0.6, 0.42, 0.27, 0.15, 0.06];
-  const LEVEL_COLORS = ['#4b5866', '#9db6cf', '#f1f1ec', '#efe0a0', '#e8ad4c', '#e8783a'];
+  // Cold to warm: blue-grey, pale blue, white, then into the pinks.
+  const LEVEL_COLORS = ['#4b5866', '#9db6cf', '#f1f1ec', '#f6d2f7', '#e9afec', '#d68cda'];
   const LEVEL_NOTES = [196, 233, 294, 349, 440, 523];
 
+  // Palette: greys for the interface, one pink family for warmth.
   const C = {
     bg: '#000',
     me: '#ecebe4',
@@ -30,11 +34,13 @@
     text: '#5c5c5c',
     textHi: '#ecebe4',
     time: '#a9a49a',
-    dim: '#151515',
+    dim: '#151515',      // empty meter squares
+    off: '#262626',      // unselected icons
     icon: '#333',
     iconHi: '#8a8a8a',
-    halo: ['#e8783a', '#e8ad4c', '#efe0a0'],
-    difficulty: ['#5fb36a', '#a7c25a', '#e0c04f', '#e08a3c', '#d9493b'], // easy -> hard
+    pink: ['#f6d2f7', '#e9afec', '#d68cda', '#bd6cc2', '#9c4fa2'], // light -> deep
+    link: '#b77cba',
+    linkHi: '#e9afec',
   };
 
   // ---------------------------------------------------------------------------
@@ -66,6 +72,13 @@
   ];
 
   // Icons sit on the same 5-pixel-tall grid as the type.
+  const USER = [
+    '.XXX.',
+    '.XXX.',
+    '.....',
+    '.XXX.',
+    'XXXXX',
+  ];
   const HEART = [
     '.X.X.',
     'XXXXX',
@@ -176,9 +189,14 @@
     'the squares on top say how close,',
     'never which way.',
     'find each other.',
-    '',
-    'a maybe machine by ravi popat',
   ];
+  const INFO_CREDIT = [
+    { t: 'a ' },
+    { t: 'maybe machine', href: 'https://maybemachines.com' },
+    { t: ' by ' },
+    { t: 'ravi popat', href: 'https://ravipopat.info' },
+  ];
+  let infoLinks = [];
 
   let locked = false, lastPointerType = 'mouse';
   let soundOn = false, actx = null, nextPulse = 0;
@@ -206,6 +224,7 @@
     });
     state = inviteRoom ? 'join' : 'menu';
   }
+  if (POSTER) state = 'menu';
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -622,11 +641,13 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
+    if (POSTER) return;
     lastPointerType = e.pointerType || 'mouse';
     if (!locked) setAbsolute(e);
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (POSTER) return;
     if (locked) {
       const mx = e.movementX || 0, my = e.movementY || 0;
       if (Math.abs(mx) > 300 || Math.abs(my) > 300) return; // ignore spurious jumps
@@ -640,8 +661,13 @@
   });
 
   canvas.addEventListener('click', () => {
-    if (infoOpen) { infoOpen = false; return; } // any click closes the info text
     const p = cursorPx();
+    if (infoOpen) { // a link opens; any other click closes the info text
+      const link = infoLinks.find((b) => p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h);
+      if (link) window.open(link.href, '_blank', 'noopener');
+      infoOpen = false;
+      return;
+    }
     for (const b of buttons) {
       if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) {
         b.action();
@@ -672,11 +698,12 @@
   // Drawing
   // ---------------------------------------------------------------------------
   function resize() {
-    dpr = window.devicePixelRatio || 1;
+    dpr = POSTER ? 1 : window.devicePixelRatio || 1;
     W = canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
     H = canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
     const sideCss = Math.min(window.innerWidth, window.innerHeight);
     u = Math.max(2, Math.round(Math.max(2, Math.round(sideCss / 240)) * dpr));
+    if (POSTER) u = 6;
     // The world fills the whole screen: x maps to the width, y to the height.
     sw = W;
     sh = H;
@@ -763,21 +790,31 @@
     button(label, snapX(cx - textWidth(label) / 2), y, action, a);
   }
 
-  function drawHalo(px, py, t) {
-    const maxR = 16;
+  // Inside the classic heart curve (x^2 + y^2 - 1)^3 - x^2 y^3 <= 0, y up.
+  function inHeart(x, y) {
+    const q = x * x + y * y - 1;
+    return q * q * q - x * x * y * y * y <= 0;
+  }
+
+  // A dithered pixel heart that blooms around the point where the cursors met.
+  function drawHeartHalo(hx, hy, t) {
+    const maxR = 18;
     const r = maxR * (1 - Math.pow(1 - t, 3));
-    if (r < 1) return;
-    const fade = 1 - t;
-    const cx = px + 2 * u, cy = py + 3 * u;
-    for (let j = -maxR; j <= maxR; j++) {
-      for (let i = -maxR; i <= maxR; i++) {
-        const d = Math.hypot(i, j);
-        if (d > r || d < 2) continue;
-        const inten = (1 - d / r) * fade * 1.15;
+    if (r < 2) return;
+    const fade = 1 - t * t;
+    const span = Math.ceil(1.3 * maxR);
+    ctx.globalAlpha = 1;
+    for (let j = -span; j <= span; j++) {
+      for (let i = -span; i <= span; i++) {
+        const x = i / r, y = -j / r + 0.15;
+        if (!inHeart(x, y)) continue;
+        // Brighter towards the middle: count how many smaller hearts contain the cell.
+        let depth = 1;
+        for (const k of [0.75, 0.5, 0.3]) if (inHeart(x / k, (y - 0.15) / k + 0.15)) depth++;
+        const inten = (depth / 4) * fade * 1.1;
         if (inten * 16 <= BAYER[j & 3][i & 3]) continue;
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = inten > 0.66 ? C.halo[2] : inten > 0.33 ? C.halo[1] : C.halo[0];
-        ctx.fillRect(cx + i * u, cy + j * u, u, u);
+        ctx.fillStyle = inten > 0.7 ? C.pink[0] : inten > 0.45 ? C.pink[1] : inten > 0.25 ? C.pink[2] : C.pink[4];
+        ctx.fillRect(hx + i * u, hy + j * u, u, u);
       }
     }
   }
@@ -825,7 +862,7 @@
 
     if (playing && found && !reduceMotion.matches) {
       const e = (t - foundAt) / HALO_MS;
-      if (e < 1) { drawHalo(mx, my, e); drawHalo(px, py, e); }
+      if (e < 1) drawHeartHalo(snapX((mx + px) / 2 + 2 * u), snapY((my + py) / 2 + 3 * u), e);
     }
 
     if (playing && (found || dist() < RADII[difficulty])) bitmap(CURSOR, px, py, C.other);
@@ -834,7 +871,7 @@
 
     if (playing && found) {
       const e = t - foundAt;
-      if (e < 4000) {
+      if (e < 4000 && !POSTER) {
         const a = e < 3000 ? 1 : 1 - (e - 3000) / 1000;
         textCentered(fmtTime(foundMs), cx, meterY() + 5 * u, C.time, a);
       }
@@ -853,15 +890,29 @@
       buttons.push(Object.assign(box, { action: () => { infoOpen = true; } }));
     }
 
+    infoLinks = [];
     if (infoOpen) {
-      const widest = Math.max(...INFO_LINES.map((l) => textWidth(l, u)));
+      const credit = INFO_CREDIT.map((p) => p.t).join('');
+      const widest = Math.max(textWidth(credit, u), ...INFO_LINES.map((l) => textWidth(l, u)));
       const s = widest > sw - 16 * u ? Math.max(1, Math.floor((u * (sw - 16 * u)) / widest)) : u;
       const lh = 8 * s;
-      let y = snapY(oy + sh / 2 - (INFO_LINES.length * lh) / 2);
+      let y = snapY(oy + sh / 2 - ((INFO_LINES.length + 2) * lh) / 2);
       for (const line of INFO_LINES) {
-        const last = line === INFO_LINES[INFO_LINES.length - 1];
-        textAt(line, snapX(cx - textWidth(line, s) / 2), y, last ? C.icon : C.text, 1, s);
+        textAt(line, snapX(cx - textWidth(line, s) / 2), y, C.text, 1, s);
         y += lh;
+      }
+      y += lh;
+      let x = snapX(cx - textWidth(credit, s) / 2);
+      for (const part of INFO_CREDIT) {
+        const w = textWidth(part.t, s) + s; // includes the gap after the last glyph
+        if (part.href) {
+          const box = Object.assign(hitBox(x, y, w - s, 5 * s), { href: part.href });
+          textAt(part.t, x, y, hover(box) ? C.linkHi : C.link, 1, s);
+          infoLinks.push(box);
+        } else {
+          textAt(part.t, x, y, C.icon, 1, s);
+        }
+        x += w;
       }
     }
 
@@ -902,15 +953,15 @@
         break;
     }
 
-    // Who's here, top-left corner: one heart for you, a second while they're in the room.
+    // Who's here, top-left corner: one user icon for you, a second while they're in the room.
     if (state === 'waiting' || state === 'playing' || state === 'left') {
       const x0 = snapX(ox + 4 * u), y0 = meterY();
-      bitmap(HEART, x0, y0, C.text);
-      if (peerPresent) bitmap(HEART, x0 + (HEART[0].length + 2) * u, y0, C.text);
+      bitmap(USER, x0, y0, C.text);
+      if (peerPresent) bitmap(USER, x0 + (USER[0].length + 2) * u, y0, C.text);
     }
 
-    // Difficulty, bottom-left corner: 5 type-height boxes. Only the selected one
-    // is lit, in its colour: green (easy) to red (hard). The word shows on hover.
+    // Difficulty, bottom-left corner: 5 hearts. Only the selected one is lit, in
+    // its pink: light (easy) to deep (hard). The word shows on hover.
     if (state !== 'error') {
       const ty = snapY(oy + sh - 9 * u);
       const bs = 5 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
@@ -924,9 +975,7 @@
       for (const box of boxes) {
         const i = box.i;
         const lit = i === difficulty, preview = !lit && i === hot;
-        ctx.globalAlpha = preview ? 0.35 : 1;
-        ctx.fillStyle = lit || preview ? C.difficulty[i] : C.dim;
-        ctx.fillRect(bx + i * (bs + gap), ty, bs, bs);
+        bitmap(HEART, bx + i * (bs + gap), ty, lit || preview ? C.pink[i] : C.off, preview ? 0.4 : 1);
         buttons.push(Object.assign(box, { action: () => setDifficulty(i) }));
       }
       ctx.globalAlpha = 1;
@@ -991,11 +1040,31 @@
   function frame(t) {
     const dt = Math.min(100, t - last);
     last = t;
-    update(t, dt);
-    render(t);
+    if (POSTER) {
+      render(foundAt + 0.45 * HALO_MS);
+    } else {
+      update(t, dt);
+      render(t);
+    }
     requestAnimationFrame(frame);
   }
 
+  // Two cursors that have just met, the heart mid-bloom, the meter full.
+  function setupPoster() {
+    state = 'playing';
+    peerPresent = true;
+    peerId = 'poster';
+    me.x = 0.5; me.y = 0.5;
+    other.x = other.tx = 0.5 + (3 * u) / sw;
+    other.y = other.ty = 0.5 + (4 * u) / sh;
+    other.known = true;
+    found = true;
+    foundAt = 0;
+    level = levelAtFound = 6;
+    difficulty = DEFAULT_DIFFICULTY;
+  }
+
   resize();
+  if (POSTER) setupPoster();
   requestAnimationFrame(frame);
 })();
