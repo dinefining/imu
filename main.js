@@ -16,8 +16,8 @@
   const LEVEL_DEBOUNCE_MS = 110;     // meter must agree for this long to step
   const STRANGER_ROOM_TIMEOUT_MS = 7000;
   const PROPOSAL_MS = 2000;
-  const HALO_MS = 1600;
-  // #poster renders a still frame of two cursors meeting, used for og.png.
+  const HALO_MS = 1400;
+  // #poster renders a still of the info screen, used for og.png.
   const POSTER = location.hash === '#poster';
 
   // Distance thresholds for the 6 meter steps: d > THRESH[k] => level k + 1.
@@ -39,6 +39,7 @@
     icon: '#333',
     iconHi: '#8a8a8a',
     pink: ['#f6d2f7', '#e9afec', '#d68cda', '#bd6cc2', '#9c4fa2'], // light -> deep
+    halo: ['#f6d2f7', '#f0a3b8', '#ec8a5a', '#e0703a'], // pale pink centre -> orange edge
     link: '#b77cba',
     linkHi: '#e9afec',
   };
@@ -703,7 +704,7 @@
     H = canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
     const sideCss = Math.min(window.innerWidth, window.innerHeight);
     u = Math.max(2, Math.round(Math.max(2, Math.round(sideCss / 240)) * dpr));
-    if (POSTER) u = 6;
+    if (POSTER) u = 4;
     // The world fills the whole screen: x maps to the width, y to the height.
     sw = W;
     sh = H;
@@ -790,31 +791,22 @@
     button(label, snapX(cx - textWidth(label) / 2), y, action, a);
   }
 
-  // Inside the classic heart curve (x^2 + y^2 - 1)^3 - x^2 y^3 <= 0, y up.
-  function inHeart(x, y) {
-    const q = x * x + y * y - 1;
-    return q * q * q - x * x * y * y * y <= 0;
-  }
-
-  // A dithered pixel heart that blooms around the point where the cursors met.
-  function drawHeartHalo(hx, hy, t) {
-    const maxR = 18;
+  // A round dithered pixel halo that blooms around a cursor.
+  function drawHalo(px, py, t) {
+    const maxR = 16;
     const r = maxR * (1 - Math.pow(1 - t, 3));
-    if (r < 2) return;
-    const fade = 1 - t * t;
-    const span = Math.ceil(1.3 * maxR);
+    if (r < 1) return;
+    const fade = 1 - t;
+    const cx = px + 2 * u, cy = py + 3 * u;
     ctx.globalAlpha = 1;
-    for (let j = -span; j <= span; j++) {
-      for (let i = -span; i <= span; i++) {
-        const x = i / r, y = -j / r + 0.15;
-        if (!inHeart(x, y)) continue;
-        // Brighter towards the middle: count how many smaller hearts contain the cell.
-        let depth = 1;
-        for (const k of [0.75, 0.5, 0.3]) if (inHeart(x / k, (y - 0.15) / k + 0.15)) depth++;
-        const inten = (depth / 4) * fade * 1.1;
+    for (let j = -maxR; j <= maxR; j++) {
+      for (let i = -maxR; i <= maxR; i++) {
+        const d = Math.hypot(i, j);
+        if (d > r || d < 2) continue;
+        const inten = (1 - d / r) * fade * 1.15;
         if (inten * 16 <= BAYER[j & 3][i & 3]) continue;
-        ctx.fillStyle = inten > 0.7 ? C.pink[0] : inten > 0.45 ? C.pink[1] : inten > 0.25 ? C.pink[2] : C.pink[4];
-        ctx.fillRect(hx + i * u, hy + j * u, u, u);
+        ctx.fillStyle = C.halo[inten > 0.38 ? 0 : inten > 0.16 ? 1 : inten > 0.07 ? 2 : 3];
+        ctx.fillRect(cx + i * u, cy + j * u, u, u);
       }
     }
   }
@@ -862,7 +854,7 @@
 
     if (playing && found && !reduceMotion.matches) {
       const e = (t - foundAt) / HALO_MS;
-      if (e < 1) drawHeartHalo(snapX((mx + px) / 2 + 2 * u), snapY((my + py) / 2 + 3 * u), e);
+      if (e < 1) { drawHalo(mx, my, e); drawHalo(px, py, e); }
     }
 
     if (playing && (found || dist() < RADII[difficulty])) bitmap(CURSOR, px, py, C.other);
@@ -1041,7 +1033,7 @@
     const dt = Math.min(100, t - last);
     last = t;
     if (POSTER) {
-      render(foundAt + 0.45 * HALO_MS);
+      render(0);
     } else {
       update(t, dt);
       render(t);
@@ -1049,19 +1041,13 @@
     requestAnimationFrame(frame);
   }
 
-  // Two cursors that have just met, the heart mid-bloom, the meter full.
+  // The share image: the info screen, your cursor above the text, meter dark.
   function setupPoster() {
-    state = 'playing';
-    peerPresent = true;
-    peerId = 'poster';
-    me.x = 0.5; me.y = 0.5;
-    other.x = other.tx = 0.5 + (3 * u) / sw;
-    other.y = other.ty = 0.5 + (4 * u) / sh;
-    other.known = true;
-    found = true;
-    foundAt = 0;
-    level = levelAtFound = 6;
-    difficulty = DEFAULT_DIFFICULTY;
+    state = 'left';      // one user icon, empty meter, no centre text
+    infoOpen = true;
+    me.x = 0.5; me.y = 0.22;
+    difficulty = 0;
+    soundOn = true;
   }
 
   resize();
