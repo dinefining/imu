@@ -111,7 +111,7 @@
     '.': ['.', '.', '.', '.', 'X'], ':': ['.', 'X', '.', 'X', '.'],
     '/': ['..X', '..X', '.X.', 'X..', 'X..'], '-': ['...', '...', 'XXX', '...', '...'],
     '?': ['XX.', '..X', '.X.', '...', '.X.'], '_': ['...', '...', '...', '...', 'XXX'],
-    '=': ['...', 'XXX', '...', 'XXX', '...'],
+    '=': ['...', 'XXX', '...', 'XXX', '...'], ',': ['.', '.', '.', 'X', 'X'],
     ' ': ['..', '..', '..', '..', '..'],
   };
 
@@ -168,6 +168,17 @@
   let level = 0, pendingLevel = 0, pendingSince = 0;
   let flashText = '', flashUntil = 0;
   let inviteId = '', inviteUrl = '', copiedUntil = 0;
+  let infoOpen = false;
+
+  const INFO_LINES = [
+    'two people. one black page.',
+    'you only see your own cursor.',
+    'the squares on top say how close,',
+    'never which way.',
+    'find each other.',
+    '',
+    'a maybe machine by ravi popat',
+  ];
 
   let locked = false, lastPointerType = 'mouse';
   let soundOn = false, actx = null, nextPulse = 0;
@@ -629,6 +640,7 @@
   });
 
   canvas.addEventListener('click', () => {
+    if (infoOpen) { infoOpen = false; return; } // any click closes the info text
     const p = cursorPx();
     for (const b of buttons) {
       if (p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h) {
@@ -832,7 +844,28 @@
       }
     }
 
-    switch (state) {
+    // Info, top-right corner: toggles a short text about the game.
+    if (state !== 'error') {
+      const label = 'info';
+      const ix = snapX(ox + sw - 4 * u - textWidth(label)), iy = meterY();
+      const box = hitBox(ix, iy, textWidth(label), 5 * u);
+      textAt(label, ix, iy, infoOpen || hover(box) ? C.iconHi : C.icon);
+      buttons.push(Object.assign(box, { action: () => { infoOpen = true; } }));
+    }
+
+    if (infoOpen) {
+      const widest = Math.max(...INFO_LINES.map((l) => textWidth(l, u)));
+      const s = widest > sw - 16 * u ? Math.max(1, Math.floor((u * (sw - 16 * u)) / widest)) : u;
+      const lh = 8 * s;
+      let y = snapY(oy + sh / 2 - (INFO_LINES.length * lh) / 2);
+      for (const line of INFO_LINES) {
+        const last = line === INFO_LINES[INFO_LINES.length - 1];
+        textAt(line, snapX(cx - textWidth(line, s) / 2), y, last ? C.icon : C.text, 1, s);
+        y += lh;
+      }
+    }
+
+    switch (infoOpen ? 'info' : state) {
       case 'menu': {
         if (!ENABLE_STRANGER) {
           buttonCentered('invite', cx, cy, invite);
