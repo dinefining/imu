@@ -66,6 +66,13 @@
   ];
 
   // Icons sit on the same 5-pixel-tall grid as the type.
+  const HEART = [
+    '.X.X.',
+    'XXXXX',
+    'XXXXX',
+    '.XXX.',
+    '..X..',
+  ];
   const COPY_ICON = [
     '..XXXX',
     'XXXX.X',
@@ -862,24 +869,20 @@
         break;
     }
 
-    // Who's here, top-left corner: you, and them (lit while they're in the room).
+    // Who's here, top-left corner: one heart for you, a second while they're in the room.
     if (state === 'waiting' || state === 'playing' || state === 'left') {
-      const sq = 2 * u, x0 = snapX(ox + 4 * u), y0 = meterY();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = C.text;
-      ctx.fillRect(x0, y0, sq, sq);
-      ctx.fillStyle = peerPresent ? C.other : C.dim;
-      ctx.fillRect(x0 + sq + u, y0, sq, sq);
+      const x0 = snapX(ox + 4 * u), y0 = meterY();
+      bitmap(HEART, x0, y0, C.text);
+      if (peerPresent) bitmap(HEART, x0 + (HEART[0].length + 2) * u, y0, C.text);
     }
 
-    // Difficulty, bottom-left corner: the word, then 5 type-height boxes.
-    // Only the selected one is lit, in its colour: green (easy) to red (hard).
+    // Difficulty, bottom-left corner: 5 type-height boxes. Only the selected one
+    // is lit, in its colour: green (easy) to red (hard). The word shows on hover.
     if (state !== 'error') {
-      const ty = snapY(oy + sh - 9 * u), tx = snapX(ox + 4 * u);
-      textAt('difficulty', tx, ty, C.icon);
+      const ty = snapY(oy + sh - 9 * u);
       const bs = 5 * u, gap = (lastPointerType === 'mouse' ? 1 : 3) * u;
       const pad = (lastPointerType === 'mouse' ? 2 : 5) * u;
-      const bx = tx + textWidth('difficulty') + 3 * u;
+      const bx = snapX(ox + 4 * u);
       const boxes = RADII.map((_, i) => {
         const x = bx + i * (bs + gap);
         return { x: x - gap / 2, y: ty - pad, w: bs + gap, h: bs + 2 * pad, i };
@@ -894,6 +897,7 @@
         buttons.push(Object.assign(box, { action: () => setDifficulty(i) }));
       }
       ctx.globalAlpha = 1;
+      if (hot >= 0) textAt('difficulty', bx + RADII.length * (bs + gap) + 2 * u, ty, C.icon);
     }
 
     // Sound toggle, bottom-right corner of the play area.
